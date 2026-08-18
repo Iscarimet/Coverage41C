@@ -203,29 +203,31 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
 
     private void targetStarted(DBGUIExtCmdInfoStartedImpl command) {
         DebugTargetId targetId = command.getTargetID();
+        String targetIdStr = targetId.getId();
+        String seanceId = targetId.getSeanceId();
         try {
-            client.attachRuntimeDebugTargets(Collections.singletonList(UUID.fromString(targetId.getId())));
+            client.attachRuntimeDebugTargets(Collections.singletonList(UUID.fromString(targetIdStr)));
+
+            if (enableSessions && !targetIdToUserName.containsKey(targetIdStr)) {
+                // Используем seanceId как fallback имя сессии — он уникален для каждого сеанса
+                targetIdToUserName.put(targetIdStr, seanceId);
+                sessionCoverageData.computeIfAbsent(seanceId, k -> new HashMap<>() {
+                    @Override
+                    public Map<BigDecimal, Integer> get(Object key) {
+                        Map<BigDecimal, Integer> map = super.get(key);
+                        if (map == null) {
+                            map = new HashMap<>();
+                            put((URI) key, map);
+                        }
+                        return map;
+                    }
+                });
+                logger.info("Registered session seanceId: {} for target: {}", seanceId, targetIdStr);
+            }
         } catch (RuntimeDebugClientException e) {
             logger.info("Command: {} error!", command.getCmdID().getName());
             logger.error(e.getLocalizedMessage());
         }
-    }
-
-    private String evaluateUserName(DebugTargetId debugTarget) throws RuntimeDebugClientException {
-        try {
-            String result = client.evaluateExpressionAsString(debugTarget, "&InfoContext.CurrentUser().Name");
-            if (result != null) {
-                String cleaned = result.trim();
-                String[] parts = cleaned.split(">");
-                if (parts.length > 1) {
-                    return parts[parts.length - 1].trim();
-                }
-                return cleaned.isEmpty() ? null : cleaned;
-            }
-        } catch (Exception e) {
-            logger.warn("Failed to evaluate user name: {}", e.getLocalizedMessage());
-        }
-        return null;
     }
 
     private void mainLoop(Map<String, URI> uriListByKey, Set<String> externalDataProcessorsUriSet) throws RuntimeDebugClientException {
@@ -251,20 +253,9 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
         final String effectiveSessionUserName;
         if (enableSessions && targetIdStr != null) {
             if (!targetIdToUserName.containsKey(targetIdStr)) {
-                try {
-                    String userName = evaluateUserName(cmdTargetId);
-                    if (userName != null) {
-                        targetIdToUserName.put(targetIdStr, userName);
-                        logger.info("Registered session user: {} for target: {}", userName, targetIdStr);
-                    } else {
-                        targetIdToUserName.put(targetIdStr, "unknown");
-                        logger.warn("Failed to get user name for target {}, using 'unknown'", targetIdStr);
-                    }
-                } catch (RuntimeDebugClientException e) {
-                    targetIdToUserName.put(targetIdStr, "unknown");
-                    logger.error("Failed to evaluate user name for target {}: {}", targetIdStr, e.getLocalizedMessage());
-                }
-                sessionCoverageData.computeIfAbsent(targetIdToUserName.get(targetIdStr), k -> new HashMap<>() {
+                effectiveSessionUserName = targetIdStr;
+                targetIdToUserName.put(targetIdStr, targetIdStr);
+                sessionCoverageData.computeIfAbsent(targetIdStr, k -> new HashMap<>() {
                     @Override
                     public Map<BigDecimal, Integer> get(Object key) {
                         Map<BigDecimal, Integer> map = super.get(key);
@@ -275,8 +266,10 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
                         return map;
                     }
                 });
+                logger.warn("Target not yet registered (no targetStarted), using targetId: {}", targetIdStr);
+            } else {
+                effectiveSessionUserName = targetIdToUserName.get(targetIdStr);
             }
-            effectiveSessionUserName = targetIdToUserName.get(targetIdStr);
         } else {
             effectiveSessionUserName = null;
         }
