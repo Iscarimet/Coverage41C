@@ -255,23 +255,26 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
                     String userName = evaluateUserName(cmdTargetId);
                     if (userName != null) {
                         targetIdToUserName.put(targetIdStr, userName);
-                        sessionCoverageData.computeIfAbsent(userName, k -> new HashMap<>() {
-                            @Override
-                            public Map<BigDecimal, Integer> get(Object key) {
-                                Map<BigDecimal, Integer> map = super.get(key);
-                                if (map == null) {
-                                    map = new HashMap<>();
-                                    put((URI) key, map);
-                                }
-                                return map;
-                            }
-                        });
                         logger.info("Registered session user: {} for target: {}", userName, targetIdStr);
+                    } else {
+                        targetIdToUserName.put(targetIdStr, "unknown");
+                        logger.warn("Failed to get user name for target {}, using 'unknown'", targetIdStr);
                     }
                 } catch (RuntimeDebugClientException e) {
+                    targetIdToUserName.put(targetIdStr, "unknown");
                     logger.error("Failed to evaluate user name for target {}: {}", targetIdStr, e.getLocalizedMessage());
-                    throw new RuntimeException("debug API error: " + e.getLocalizedMessage(), e);
                 }
+                sessionCoverageData.computeIfAbsent(targetIdToUserName.get(targetIdStr), k -> new HashMap<>() {
+                    @Override
+                    public Map<BigDecimal, Integer> get(Object key) {
+                        Map<BigDecimal, Integer> map = super.get(key);
+                        if (map == null) {
+                            map = new HashMap<>();
+                            put((URI) key, map);
+                        }
+                        return map;
+                    }
+                });
             }
             effectiveSessionUserName = targetIdToUserName.get(targetIdStr);
         } else {
@@ -431,6 +434,16 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
     @Override
     protected Map<URI, Map<BigDecimal, Integer>> getCoverageData() {
         return coverageData;
+    }
+
+    @Override
+    protected Map<String, Map<URI, Map<BigDecimal, Integer>>> getSessionCoverageData() {
+        return sessionCoverageData;
+    }
+
+    @Override
+    protected boolean getEnableSessions() {
+        return enableSessions;
     }
 
     @Override

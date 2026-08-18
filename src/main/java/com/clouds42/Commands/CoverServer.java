@@ -107,7 +107,11 @@ public abstract class CoverServer {
                     logger.info("Get command: {}", line);
                     switch (line) {
                         case PipeMessages.DUMP_COMMAND:
-                            Utils.dumpCoverageFile(getCoverageData(), getMetadataOptions(), getOutputOptions());
+                            if (getEnableSessions()) {
+                                Utils.dumpSessionCoverageFile(getSessionCoverageData(), getMetadataOptions(), getOutputOptions());
+                            } else {
+                                Utils.dumpCoverageFile(getCoverageData(), getMetadataOptions(), getOutputOptions());
+                            }
                             out.println(PipeMessages.OK_RESULT);
                             return true;
                         case PipeMessages.STATS_COMMAND:
@@ -147,7 +151,10 @@ public abstract class CoverServer {
 
     protected abstract Map<URI, Map<BigDecimal, Integer>> getCoverageData();
 
+    protected abstract Map<String, Map<URI, Map<BigDecimal, Integer>>> getSessionCoverageData();
+
     protected abstract OutputOptions getOutputOptions();
+    protected abstract boolean getEnableSessions();
 
 
 }
