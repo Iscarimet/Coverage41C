@@ -87,6 +87,9 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
     @Option(names = {"--opid"}, description = "Owner process PID", defaultValue = "-1")
     Integer opid;
 
+    @Option(names = {"--sessions"}, description = "Разделить покрытие по сессиям")
+    private boolean enableSessions;
+
     private DebugClient client;
 
     private final Map<URI, Map<BigDecimal, Integer>> coverageData = new HashMap<>() {
@@ -100,6 +103,9 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
             return map;
         }
     };
+
+    private final Map<String, Map<URI, Map<BigDecimal, Integer>>> sessionCoverageData = new LinkedHashMap<>();
+    private final Map<String, String> targetIdToUserName = new HashMap<>();
 
 
     private final AtomicBoolean stopExecution = new AtomicBoolean(false);
@@ -205,6 +211,23 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
         }
     }
 
+    private String evaluateUserName(DebugTargetId debugTarget) throws RuntimeDebugClientException {
+        try {
+            String result = client.evaluateExpressionAsString(debugTarget, "&InfoContext.CurrentUser().Name");
+            if (result != null) {
+                String cleaned = result.trim();
+                String[] parts = cleaned.split(">");
+                if (parts.length > 1) {
+                    return parts[parts.length - 1].trim();
+                }
+                return cleaned.isEmpty() ? null : cleaned;
+            }
+        } catch (Exception e) {
+            logger.warn("Failed to evaluate user name: {}", e.getLocalizedMessage());
+        }
+        return null;
+    }
+
     private void mainLoop(Map<String, URI> uriListByKey, Set<String> externalDataProcessorsUriSet) throws RuntimeDebugClientException {
         while (!stopExecution.get()) {
             List<? extends DBGUIExtCmdInfoBase> commandsList = client.ping();
@@ -222,6 +245,39 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
 
     private void measureResultProcessing(Map<String, URI> uriListByKey, Set<String> externalDataProcessorsUriSet, DBGUIExtCmdInfoMeasureImpl command) {
         logger.info("Found MEASURE_RESULT_PROCESSING command");
+
+        DebugTargetId cmdTargetId = command.getTargetID();
+        String targetIdStr = cmdTargetId != null ? cmdTargetId.getId() : null;
+        final String effectiveSessionUserName;
+        if (enableSessions && targetIdStr != null) {
+            if (!targetIdToUserName.containsKey(targetIdStr)) {
+                try {
+                    String userName = evaluateUserName(cmdTargetId);
+                    if (userName != null) {
+                        targetIdToUserName.put(targetIdStr, userName);
+                        sessionCoverageData.computeIfAbsent(userName, k -> new HashMap<>() {
+                            @Override
+                            public Map<BigDecimal, Integer> get(Object key) {
+                                Map<BigDecimal, Integer> map = super.get(key);
+                                if (map == null) {
+                                    map = new HashMap<>();
+                                    put((URI) key, map);
+                                }
+                                return map;
+                            }
+                        });
+                        logger.info("Registered session user: {} for target: {}", userName, targetIdStr);
+                    }
+                } catch (RuntimeDebugClientException e) {
+                    logger.error("Failed to evaluate user name for target {}: {}", targetIdStr, e.getLocalizedMessage());
+                    throw new RuntimeException("debug API error: " + e.getLocalizedMessage(), e);
+                }
+            }
+            effectiveSessionUserName = targetIdToUserName.get(targetIdStr);
+        } else {
+            effectiveSessionUserName = null;
+        }
+
         PerformanceInfoMain measure = command.getMeasure();
         EList<PerformanceInfoModule> moduleInfoList = measure.getModuleData();
         moduleInfoList.forEach(moduleInfo -> {
@@ -251,7 +307,19 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
                     EList<PerformanceInfoLine> lineInfoList = moduleInfo.getLineInfo();
                     lineInfoList.forEach(lineInfo -> {
                         BigDecimal lineNo = lineInfo.getLineNo();
-                        Map<BigDecimal, Integer> coverMap = coverageData.get(uri);
+
+                        Map<BigDecimal, Integer> coverMap;
+                        if (enableSessions && effectiveSessionUserName != null) {
+                            Map<URI, Map<BigDecimal, Integer>> sessionMap = sessionCoverageData.get(effectiveSessionUserName);
+                            if (sessionMap != null) {
+                                coverMap = sessionMap.get(uri);
+                            } else {
+                                coverMap = coverageData.get(uri);
+                            }
+                        } else {
+                            coverMap = coverageData.get(uri);
+                        }
+
                         if (!coverMap.isEmpty() || rawMode) {
                             if (!rawMode && !coverMap.containsKey(lineNo)) {
                                 if (loggingOptions.isVerbose()) {
@@ -342,7 +410,11 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
             logger.error(e.getLocalizedMessage());
         }
 
-        Utils.dumpCoverageFile(coverageData, metadataOptions, outputOptions);
+        if (enableSessions) {
+            Utils.dumpSessionCoverageFile(sessionCoverageData, metadataOptions, outputOptions);
+        } else {
+            Utils.dumpCoverageFile(coverageData, metadataOptions, outputOptions);
+        }
         if (serverPipeOut != null) {
             serverPipeOut.println(PipeMessages.OK_RESULT);
         }

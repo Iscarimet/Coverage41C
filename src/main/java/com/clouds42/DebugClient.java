@@ -278,6 +278,54 @@ public class DebugClient extends AbstractDebugClient{
         return responseContent != null && !responseContent.getResult().isEmpty() ? responseContent.getResult() : null;
     }
 
+    public String evaluateExpressionAsString(DebugTargetId debugTarget, String expression) throws RuntimeDebugClientException {
+        UUID expressionUuid = UUID.randomUUID();
+        UUID evaluationUuid = UUID.randomUUID();
+
+        RDBGEvalExprRequest requestContent = ResponseFactory.eINSTANCE.createRDBGEvalExprRequest();
+        requestContent.setCalcWaitingTime(new BigDecimal(5000));
+        requestContent.setTargetID(this.buildDebugTargetIdLight(debugTarget));
+
+        CalculationSourceDataStorage storage = this.createCalculationSourceDataStorage(0, 1024, false);
+        SourceCalculationDataInfo expressionInfo = CalculationsFactory.eINSTANCE.createSourceCalculationDataInfo();
+        expressionInfo.setExpressionID(expressionUuid.toString());
+        expressionInfo.setExpressionResultID(evaluationUuid.toString());
+
+        SourceCalculationDataItem expressionItem = CalculationsFactory.eINSTANCE.createSourceCalculationDataItem();
+        expressionItem.setExpression(expression);
+        expressionItem.setItemType(SourceCalculationDataItemType.EXPRESSION);
+        expressionInfo.getCalcItem().add(expressionItem);
+        expressionInfo.getInterfaces().add(ViewInterface.CONTEXT);
+
+        storage.setSrcCalcInfo(expressionInfo);
+        requestContent.getExpr().add(storage);
+
+        Request request = this.buildRequest(HttpMethod.POST, this.debugComponentUrl).param("cmd", "evalExpr");
+        RDBGEvalExprResponse responseContent = AbstractDebugClient.performRuntimeHttpRequest(this, request, this.initRequest(requestContent), RDBGEvalExprResponse.class);
+
+        if (responseContent == null || responseContent.getResult().isEmpty()) {
+            return null;
+        }
+
+        CalculationResultBaseData result = responseContent.getResult().iterator().next();
+        com._1c.g5.v8.dt.debug.model.calculations.BaseValueInfoData valueInfo = result.getResultValueInfo();
+        if (valueInfo == null) {
+            return null;
+        }
+
+        byte[] presBytes = valueInfo.getPres();
+        if (presBytes != null && presBytes.length > 0) {
+            return new String(presBytes).trim();
+        }
+
+        byte[] stringBytes = valueInfo.getValueString();
+        if (stringBytes != null && stringBytes.length > 0) {
+            return new String(stringBytes).trim();
+        }
+
+        return null;
+    }
+
     public CalculationResultBaseData evaluateVariables(DebugTargetId debugTarget, int stackLevel, int maxSize, boolean isMultiLine, int waitTime, UUID expressionUuid, UUID evaluationUuid) throws RuntimeDebugClientException {
         RDBGEvalLocalVariablesRequest requestContent = ResponseFactory.eINSTANCE.createRDBGEvalLocalVariablesRequest();
         requestContent.setCalcWaitingTime(new BigDecimal(waitTime));
