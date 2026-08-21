@@ -44,7 +44,25 @@ Coverage41C start -i DefAlias -u http://127.0.0.1:1550 -P C:\path\to\sources\ -o
         <lineToCover covered="false" lineNumber="11"/>
         <lineToCover covered="true" lineNumber="5"/>
         <lineToCover covered="true" lineNumber="4"/>
+ ```
+
+### Разделение покрытия по сессиям
+
+Если тесты запускаются параллельно в разных сеансах 1С:Предприятия (например, под разными пользователями), можно получить разнесённое покрытие для каждой сессии с помощью флага `--sessions`.
+
+Запуск с разделением по сессиям:
+
+```cmd
+Coverage41C start -i <ИмяИнформационнойБазы> -u http://127.0.0.1:1550 -P C:\path\to\sources\ -o coverage.xml --sessions
 ```
+
+При завершении работы для каждого сеанса создаётся отдельный файл покрытия:
+- `coverage_<seanceId>.xml`
+- `coverage_<anotherSessionId>.xml`
+
+Имя сессии (seanceId) подставляется в имя файла. Содержимое файлов имеет стандартный формат покрытия (без обёрток `<session>`).
+
+> **Примечание:** Разделение по сессиям идентифицирует сессии по seanceId (уникальному идентификатору сеанса 1С:Предприятия). Для файловой базы каждый запускаемый клиент-сеанс должен быть запущен с флагами запуска, указывающими имя используемого пользователя.
 
 Справка из командной строки:
 ```cmd
@@ -109,7 +127,8 @@ Start measure and save coverage data to file
   -t, --timeout=<pingTimeout>
                            Ping timeout. Default - 1000
       --verbose            If you need more logs. Default - false
-      --opid=<opid>        Owner process PID
-  -h, --help               Show this help message and exit.
+       --opid=<opid>        Owner process PID
+       --sessions           Разделить покрытие по сессиям
+   -h, --help               Show this help message and exit.
   -V, --version            Print version information and exit.
 ```

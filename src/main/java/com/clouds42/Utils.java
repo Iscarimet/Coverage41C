@@ -359,6 +359,63 @@ public class Utils {
         }
     }
 
+    public static void dumpSessionCoverageFile(Map<String, Map<URI, Map<BigDecimal, Integer>>> sessionCoverageData,
+                                                MetadataOptions metadataOptions,
+                                                OutputOptions outputOptions) {
+        if (sessionCoverageData.isEmpty()) {
+            logger.info("No session data to dump");
+            return;
+        }
+
+        sessionCoverageData.forEach((sessionName, coverageData) -> {
+            String safeSessionName = sanitizeFileName(sessionName);
+            File sessionOutputFile;
+            File baseOutputFile = outputOptions.getOutputFile();
+
+            if (baseOutputFile == null) {
+                logger.info("Session coverage data for session: {}", sessionName);
+                sessionOutputFile = null;
+            } else {
+                String derivedFileName = deriveSessionFileName(baseOutputFile, safeSessionName);
+                sessionOutputFile = new File(derivedFileName);
+            }
+
+            OutputOptions sessionOutputOptions = new OutputOptions();
+            sessionOutputOptions.setOutputFormat(outputOptions.getOutputFormat());
+            sessionOutputOptions.setOutputFile(sessionOutputFile);
+
+            dumpCoverageFile(coverageData, metadataOptions, sessionOutputOptions);
+        });
+    }
+
+    private static String sanitizeFileName(String name) {
+        return name.replaceAll("[^a-zA-Z0-9._-]", "_");
+    }
+
+    private static String deriveSessionFileName(File baseFile, String sessionName) {
+        String fileName = baseFile.getName();
+        File parentDir = baseFile.getParentFile();
+
+        int dotIndex = fileName.lastIndexOf('.');
+        String baseName;
+        String extension;
+
+        if (dotIndex > 0) {
+            baseName = fileName.substring(0, dotIndex);
+            extension = fileName.substring(dotIndex);
+        } else {
+            baseName = fileName;
+            extension = "";
+        }
+
+        String newFileName = baseName + "_" + sessionName + extension;
+
+        if (parentDir != null) {
+            return parentDir.getPath() + File.separator + newFileName;
+        }
+        return newFileName;
+    }
+
     private static void dumpCoberturaFile(Map<URI, Map<BigDecimal, Integer>> coverageData,
                                           MetadataOptions metadataOptions,
                                           OutputOptions outputOptions) {
@@ -564,8 +621,8 @@ public class Utils {
     }
 
     private static void dumpLcovFile(Map<URI, Map<BigDecimal, Integer>> coverageData,
-                                     MetadataOptions metadataOptions,
-                                     OutputOptions outputOptions) {
+                                      MetadataOptions metadataOptions,
+                                      OutputOptions outputOptions) {
 
         try {
             OutputStreamWriter outputStream;
