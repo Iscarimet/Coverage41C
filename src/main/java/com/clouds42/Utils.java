@@ -360,17 +360,60 @@ public class Utils {
     }
 
     public static void dumpSessionCoverageFile(Map<String, Map<URI, Map<BigDecimal, Integer>>> sessionCoverageData,
-                                               MetadataOptions metadataOptions,
-                                               OutputOptions outputOptions) {
-        if (outputOptions.getOutputFormat() == OutputOptions.OutputFormat.GENERIC_COVERAGE) {
-            dumpGenericCoverageFileSession(sessionCoverageData, metadataOptions, outputOptions);
-        } else if (outputOptions.getOutputFormat() == OutputOptions.OutputFormat.LCOV) {
-            dumpLcovFileSession(sessionCoverageData, metadataOptions, outputOptions);
-        } else if (outputOptions.getOutputFormat() == OutputOptions.OutputFormat.COBERTURA) {
-            dumpCoberturaFileSession(sessionCoverageData, metadataOptions, outputOptions);
-        } else {
-            logger.info("Unknown format");
+                                                MetadataOptions metadataOptions,
+                                                OutputOptions outputOptions) {
+        if (sessionCoverageData.isEmpty()) {
+            logger.info("No session data to dump");
+            return;
         }
+
+        sessionCoverageData.forEach((sessionName, coverageData) -> {
+            String safeSessionName = sanitizeFileName(sessionName);
+            File sessionOutputFile;
+            File baseOutputFile = outputOptions.getOutputFile();
+
+            if (baseOutputFile == null) {
+                logger.info("Session coverage data for session: {}", sessionName);
+                sessionOutputFile = null;
+            } else {
+                String derivedFileName = deriveSessionFileName(baseOutputFile, safeSessionName);
+                sessionOutputFile = new File(derivedFileName);
+            }
+
+            OutputOptions sessionOutputOptions = new OutputOptions();
+            sessionOutputOptions.setOutputFormat(outputOptions.getOutputFormat());
+            sessionOutputOptions.setOutputFile(sessionOutputFile);
+
+            dumpCoverageFile(coverageData, metadataOptions, sessionOutputOptions);
+        });
+    }
+
+    private static String sanitizeFileName(String name) {
+        return name.replaceAll("[^a-zA-Z0-9._-]", "_");
+    }
+
+    private static String deriveSessionFileName(File baseFile, String sessionName) {
+        String fileName = baseFile.getName();
+        File parentDir = baseFile.getParentFile();
+
+        int dotIndex = fileName.lastIndexOf('.');
+        String baseName;
+        String extension;
+
+        if (dotIndex > 0) {
+            baseName = fileName.substring(0, dotIndex);
+            extension = fileName.substring(dotIndex);
+        } else {
+            baseName = fileName;
+            extension = "";
+        }
+
+        String newFileName = baseName + "_" + sessionName + extension;
+
+        if (parentDir != null) {
+            return parentDir.getPath() + File.separator + newFileName;
+        }
+        return newFileName;
     }
 
     private static void dumpCoberturaFile(Map<URI, Map<BigDecimal, Integer>> coverageData,
@@ -620,247 +663,6 @@ public class Utils {
             }
 
             writer.close();
-        } catch (Exception e) {
-            logger.error(e.getLocalizedMessage());
-        }
-    }
-
-    private static void dumpGenericCoverageFileSession(Map<String, Map<URI, Map<BigDecimal, Integer>>> sessionCoverageData,
-                                                       MetadataOptions metadataOptions,
-                                                       OutputOptions outputOptions) {
-        DocumentBuilderFactory icFactory = DocumentBuilderFactory.newInstance();
-        DocumentBuilder icBuilder;
-        try {
-
-            URI projectUri = Path.of(metadataOptions.getProjectDirName()).toUri();
-            icBuilder = icFactory.newDocumentBuilder();
-            Document doc = icBuilder.newDocument();
-            Element mainRootElement = doc.createElement("coverage");
-            mainRootElement.setAttribute("version", "1");
-            doc.appendChild(mainRootElement);
-
-            sessionCoverageData.forEach((sessionName, coverageData) -> {
-                Element sessionElement = doc.createElement("session");
-                sessionElement.setAttribute("name", sessionName);
-                coverageData.forEach((uri, bigDecimalsMap) -> {
-                    if (bigDecimalsMap.isEmpty()) {
-                        return;
-                    }
-                    Element fileElement = doc.createElement("file");
-                    fileElement.setAttribute("path", projectUri.relativize(uri).getPath());
-                    bigDecimalsMap.forEach((bigDecimal, integer) -> {
-                        if (integer >= 0) {
-                            Element lineElement = doc.createElement("lineToCover");
-                            lineElement.setAttribute("covered", Boolean.toString(integer > 0));
-                            lineElement.setAttribute("lineNumber", bigDecimal.toString());
-                            fileElement.appendChild(lineElement);
-                        }
-                    });
-                    sessionElement.appendChild(fileElement);
-                });
-                mainRootElement.appendChild(sessionElement);
-            });
-
-            long linesToCover = 0;
-            long coveredLinesCount = 0;
-            for (Map<URI, Map<BigDecimal, Integer>> coverageData : sessionCoverageData.values()) {
-                for (Map<BigDecimal, Integer> bigDecimalMap : coverageData.values()) {
-                    linesToCover += bigDecimalMap.values().stream().filter(value -> value >= 0).count();
-                    coveredLinesCount += bigDecimalMap.values().stream().filter(value -> value > 0).count();
-                }
-            }
-            logger.info("Lines to cover: {}", linesToCover);
-            logger.info("Covered lines: {}", coveredLinesCount);
-            if (linesToCover > 0) {
-                logger.info("Coverage: {}%", Math.floorDiv(coveredLinesCount * 10000, linesToCover) / 100.);
-            }
-            Transformer transformer = TransformerFactory.newInstance().newTransformer();
-            transformer.setOutputProperty(OutputKeys.INDENT, "yes");
-            DOMSource source = new DOMSource(doc);
-            StreamResult outputStream;
-            if (outputOptions.getOutputFile() == null) {
-                outputStream = new StreamResult(System.out);
-            } else {
-                outputStream = new StreamResult(new FileOutputStream(outputOptions.getOutputFile()));
-            }
-            transformer.transform(source, outputStream);
-        } catch (Exception e) {
-            logger.error(e.getLocalizedMessage());
-        }
-    }
-
-    private static void dumpLcovFileSession(Map<String, Map<URI, Map<BigDecimal, Integer>>> sessionCoverageData,
-                                            MetadataOptions metadataOptions,
-                                            OutputOptions outputOptions) {
-
-        try {
-            OutputStreamWriter outputStream;
-            if (outputOptions.getOutputFile() == null) {
-                outputStream = new OutputStreamWriter(System.out);
-            } else {
-                outputStream = new OutputStreamWriter(new FileOutputStream(outputOptions.getOutputFile()), StandardCharsets.UTF_8);
-            }
-            PrintWriter writer = new PrintWriter(outputStream);
-
-            URI projectUri = Path.of(metadataOptions.getProjectDirName()).toUri();
-
-            sessionCoverageData.forEach((sessionName, coverageData) -> {
-                coverageData.forEach((uri, bigDecimalsMap) -> {
-                    if (bigDecimalsMap.isEmpty()) {
-                        return;
-                    }
-                    writer.printf("TN:%s\n", sessionName);
-                    writer.printf("SF:%s\n", projectUri.relativize(uri).getPath());
-                    bigDecimalsMap.forEach((bigDecimal, integer) -> {
-                        if (integer >= 0) {
-                            writer.printf("DA:%s,%d\n", bigDecimal.toString(), integer);
-                        }
-                    });
-                    writer.printf("LH:%d\n", bigDecimalsMap.values().stream().filter(aInteger -> aInteger > 0).count());
-                    writer.printf("LF:%d\n", bigDecimalsMap.size());
-                    writer.println("end_of_record");
-                });
-            });
-            long linesToCover = 0;
-            long coveredLinesCount = 0;
-            for (Map<URI, Map<BigDecimal, Integer>> coverageData : sessionCoverageData.values()) {
-                for (Map<BigDecimal, Integer> bigDecimalMap : coverageData.values()) {
-                    linesToCover += bigDecimalMap.values().stream().filter(value -> value >= 0).count();
-                    coveredLinesCount += bigDecimalMap.values().stream().filter(value -> value > 0).count();
-                }
-            }
-            logger.info("Lines to cover: {}", linesToCover);
-            logger.info("Covered lines: {}", coveredLinesCount);
-            if (linesToCover > 0) {
-                logger.info("Coverage: {}%", Math.floorDiv(coveredLinesCount * 10000, linesToCover) / 100.);
-            }
-
-            writer.close();
-        } catch (Exception e) {
-            logger.error(e.getLocalizedMessage());
-        }
-    }
-
-    private static void dumpCoberturaFileSession(Map<String, Map<URI, Map<BigDecimal, Integer>>> sessionCoverageData,
-                                                 MetadataOptions metadataOptions,
-                                                 OutputOptions outputOptions) {
-        DocumentBuilderFactory icFactory = DocumentBuilderFactory.newInstance();
-        DocumentBuilder icBuilder;
-        try {
-            long linesToCover = 0;
-            long coveredLinesCount = 0;
-            for (Map<URI, Map<BigDecimal, Integer>> coverageData : sessionCoverageData.values()) {
-                for (Map<BigDecimal, Integer> bigDecimalMap : coverageData.values()) {
-                    linesToCover += bigDecimalMap.values().stream().filter(value -> value >= 0).count();
-                    coveredLinesCount += bigDecimalMap.values().stream().filter(value -> value > 0).count();
-                }
-            }
-            logger.info("Lines to cover: {}", linesToCover);
-            logger.info("Covered lines: {}", coveredLinesCount);
-            if (linesToCover > 0) {
-                logger.info("Coverage: {}%", Math.floorDiv(coveredLinesCount * 10000, linesToCover) / 100.);
-            }
-
-            URI projectUri = Path.of(metadataOptions.getProjectDirName()).toUri();
-            icBuilder = icFactory.newDocumentBuilder();
-            Document doc = icBuilder.newDocument();
-            Element mainRootElement = doc.createElement("coverage");
-            String lineRate = "0.0";
-            if (linesToCover > 0) {
-                lineRate = String.valueOf(Math.floorDiv(coveredLinesCount * 100, linesToCover) / 100.);
-            }
-            mainRootElement.setAttribute("line-rate", lineRate);
-            mainRootElement.setAttribute("branch-rate", "0.0");
-            mainRootElement.setAttribute("lines-covered", String.valueOf(coveredLinesCount));
-            mainRootElement.setAttribute("lines-valid", String.valueOf(linesToCover));
-            mainRootElement.setAttribute("branches-covered", "0");
-            mainRootElement.setAttribute("branches-valid", "0");
-            mainRootElement.setAttribute("complexity", "0");
-            mainRootElement.setAttribute("version", "0");
-            mainRootElement.setAttribute("timestamp", String.valueOf(Instant.now().getEpochSecond()));
-            doc.appendChild(mainRootElement);
-
-            Element sourcesElement = doc.createElement("sources");
-            mainRootElement.appendChild(sourcesElement);
-
-            Element sourceElement = doc.createElement("source");
-            String[] projectDirArray = projectUri.getPath().split("/");
-            if (projectDirArray.length > 2) {
-                sourceElement.setTextContent("/builds/" + projectDirArray[projectDirArray.length - 2] + "/" + projectDirArray[projectDirArray.length - 1] + "/");
-            } else {
-                sourcesElement.setTextContent(projectUri.getPath());
-            }
-            sourcesElement.appendChild(sourceElement);
-
-            Element packagesElement = doc.createElement("packages");
-            mainRootElement.appendChild(packagesElement);
-
-            sessionCoverageData.forEach((sessionName, coverageData) -> {
-                Element packageElement = doc.createElement("package");
-                packageElement.setAttribute("name", "Session." + sessionName);
-                String sessionPackageRate = "0.0";
-                long sessionLinesToCover = 0;
-                long sessionCoveredLinesCount = 0;
-                for (Map<BigDecimal, Integer> bigDecimalMap : coverageData.values()) {
-                    sessionLinesToCover += bigDecimalMap.values().stream().filter(value -> value >= 0).count();
-                    sessionCoveredLinesCount += bigDecimalMap.values().stream().filter(value -> value > 0).count();
-                }
-                if (sessionLinesToCover > 0) {
-                    sessionPackageRate = String.valueOf(Math.floorDiv(sessionCoveredLinesCount * 100, sessionLinesToCover) / 100.);
-                }
-                packageElement.setAttribute("line-rate", sessionPackageRate);
-                packageElement.setAttribute("branch-rate", "0.0");
-                packageElement.setAttribute("complexity", "0");
-                packagesElement.appendChild(packageElement);
-
-                Element classesElement = doc.createElement("classes");
-                packageElement.appendChild(classesElement);
-
-                coverageData.forEach((uri, bigDecimalsMap) -> {
-                    if (bigDecimalsMap.isEmpty()) {
-                        return;
-                    }
-
-                    long fileLinesToCover = bigDecimalsMap.values().stream().filter(value -> value >= 0).count();
-                    long fileCoveredLinesCount = bigDecimalsMap.values().stream().filter(value -> value > 0).count();
-                    String fileLineRate = "0.0";
-                    if (fileLinesToCover > 0) {
-                        fileLineRate = String.valueOf(Math.floorDiv(fileCoveredLinesCount * 100, fileLinesToCover) / 100.);
-                    }
-
-                    Element classElement = doc.createElement("class");
-                    classElement.setAttribute("name", projectUri.relativize(uri).getPath());
-                    classElement.setAttribute("line-rate", fileLineRate);
-                    classElement.setAttribute("branch-rate", "0.0");
-                    classElement.setAttribute("complexity", "0");
-                    classElement.setAttribute("filename", projectUri.relativize(uri).getPath());
-                    classesElement.appendChild(classElement);
-
-                    Element methodsElement = doc.createElement("methods");
-                    classElement.appendChild(methodsElement);
-
-                    bigDecimalsMap.forEach((bigDecimal, hits) -> {
-                        if (hits >= 0) {
-                            Element lineElement = doc.createElement("line");
-                            lineElement.setAttribute("hits", String.valueOf(hits));
-                            lineElement.setAttribute("number", bigDecimal.toString());
-                            lineElement.setAttribute("branch", "false");
-                            classElement.appendChild(lineElement);
-                        }
-                    });
-                });
-            });
-
-            Transformer transformer = TransformerFactory.newInstance().newTransformer();
-            transformer.setOutputProperty(OutputKeys.INDENT, "yes");
-            DOMSource source = new DOMSource(doc);
-            StreamResult outputStream;
-            if (outputOptions.getOutputFile() == null) {
-                outputStream = new StreamResult(System.out);
-            } else {
-                outputStream = new StreamResult(new FileOutputStream(outputOptions.getOutputFile()));
-            }
-            transformer.transform(source, outputStream);
         } catch (Exception e) {
             logger.error(e.getLocalizedMessage());
         }

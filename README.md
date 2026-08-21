@@ -56,49 +56,13 @@ Coverage41C start -i DefAlias -u http://127.0.0.1:1550 -P C:\path\to\sources\ -o
 Coverage41C start -i <ИмяИнформационнойБазы> -u http://127.0.0.1:1550 -P C:\path\to\sources\ -o coverage.xml --sessions
 ```
 
-При завершении работы для каждого сеанса выводится его покрытие в отдельном блоке.
+При завершении работы для каждого сеанса создаётся отдельный файл покрытия:
+- `coverage_<seanceId>.xml`
+- `coverage_<anotherSessionId>.xml`
 
-`GENERIC_COVERAGE` файл будет содержать `<session name="ИмяПользователя">` обёртку для каждой сессии:
+Имя сессии (seanceId) подставляется в имя файла. Содержимое файлов имеет стандартный формат покрытия (без обёрток `<session>`).
 
-```xml
-<?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<coverage version="1">
-    <session name="TestUser1">
-        <file path="CommonCommands/СменитьПароль/Ext/CommandModule.bsl">
-            <lineToCover covered="true" lineNumber="13"/>
-            <lineToCover covered="false" lineNumber="9"/>
-        </file>
-    </session>
-    <session name="TestUser2">
-        <file path="Catalogs/Справочник/Forms/Форма/Ext/Form/Module.bsl">
-            <lineToCover covered="true" lineNumber="5"/>
-        </file>
-    </session>
-</coverage>
-```
-
-Для формата `LCov`:
-
-```
-TN:TestUser1
-SF:CommonCommands/СменитьПароль/Ext/CommandModule.bsl
-DA:13,1
-DA:9,0
-end_of_record
-```
-
-Для формата `Cobertura`:
-
-```xml
-<package name="Session.TestUser1">
-    ...
-</package>
-<package name="Session.TestUser2">
-    ...
-</package>
-```
-
-> **Примечание:** Разделение по сессиям определяет имя пользователя сеанса 1С:Предприятия, поэтому тесты должны выполняться под разными учётными записями пользователей. Для файловой базы каждый запускаемый клиент-сеанс должен быть запущен с флагами запуска, указывающими имя используемого пользователя.
+> **Примечание:** Разделение по сессиям идентифицирует сессии по seanceId (уникальному идентификатору сеанса 1С:Предприятия). Для файловой базы каждый запускаемый клиент-сеанс должен быть запущен с флагами запуска, указывающими имя используемого пользователя.
 
 Справка из командной строки:
 ```cmd
